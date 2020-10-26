@@ -108,6 +108,10 @@ UserSchema.statics.hasRefreshTokenExpired = (expiresAt) => {
   }
 }
 
+UserSchema.statics.getJWTSecret = () => {
+  return jwtSecret;
+}
+
 UserSchema.pre('save', function(next) {
   let user = this;
   let costFactor = 10;
@@ -138,7 +142,7 @@ let saveSessionToDatabase = (user, refreshToken) => {
 }
 
 let generateRefreshTokenExpiryTime = () => {
-  let daysUntilExpire = 10;
+  let daysUntilExpire = 100;
   let secondsUntilExpire = ((daysUntilExpire * 24) * 60) * 60;
   return ((Date.now() / 1000) + secondsUntilExpire);
 }

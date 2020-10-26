@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const { mongoose } = require('./db/mongoose');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 
@@ -21,11 +22,22 @@ app.use(function(req, res, next) {
   next();
 });
 
+let authenticate = (req, res, next) => {
+  let token = req.header('x-access-token');
+  jwt.verify(token, User.getJWTSecret(), (err, decoded) => {
+    if(err) {
+      res.status(401).send(err);
+    } else {
+      req.user_id = decoded._id;
+      next();
+    }
+  })
+}
+
 let verifySession = (req, res, next) => {
   let refreshToken = req.header('x-refresh-token');
   let _id = req.header('_id');
   User.findByIdAndToken(_id, refreshToken).then((user) => {
-    console.log('chegou no then???', user)
     if(!user) {
       return Promise.reject({ error: "User not found" })
     }
@@ -57,25 +69,28 @@ let verifySession = (req, res, next) => {
 const { List, Task, User } = require('./db/models');
 
 //LISTS
-app.get('/lists', (req, res) => {
-  List.find({}).then((lists) => {
+app.get('/lists', authenticate, (req, res) => {
+  List.find({
+    // _userId: req.user_id
+  }).then((lists) => {
     res.send(lists)
   })
 });
 
-app.post('/lists', (req, res) => {
+app.post('/lists', authenticate, (req, res) => {
   let title = req.body.title;
   let newList = new List({
-    title
+    title,
+    _userId: req.user_id
   });
   newList.save().then(listDoc => {
     res.send(listDoc)
   })
 });
 
-app.patch('/lists/:id', (req, res) => {
+app.patch('/lists/:id', authenticate, (req, res) => {
   List.findOneAndUpdate(
-    { _id: req.params.id },
+    { _id: req.params.id, _userId: req.user_id },
     { $set: req.body }
   ).then(() => {
     res.send({ message: 'Update sucessfully!'})
@@ -84,17 +99,19 @@ app.patch('/lists/:id', (req, res) => {
   })
 });
 
-app.delete('/lists/:id', (req, res) => {
+app.delete('/lists/:id', authenticate, (req, res) => {
   List.findOneAndRemove({
-    _id: req.params.id
+    _id: req.params.id,
+    _userId: req.user_id
   }).then(removedListDoc => {
-    res.send(removedListDoc)
+    res.send(removedListDoc);
+    deleteTasksFromList(removedListDoc._id);
   })
 });
 
 
 //TASKS
-app.get('/lists/:listId/tasks', (req, res) => {
+app.get('/lists/:listId/tasks', authenticate, (req, res) => {
   Task.find({
     _listId: req.params.listId
   }).then(tasks => {
@@ -102,45 +119,105 @@ app.get('/lists/:listId/tasks', (req, res) => {
   })
 });
 
-app.post('/lists/:listId/tasks', (req, res) => {
-  let newTask = new Task({
-    title: req.body.title,
-    _listId: req.params.listId
+app.post('/lists/:listId/tasks', authenticate, (req, res) => {
+  List.findOne({
+    _id: req.params.listId,
+    _userId: req.user_id
+  }).then((list) => {
+    if(list) {
+      return true;
+    } else {
+      return false;
+    }
+  }).then(canCreateTask => {
+    if(canCreateTask) {
+      let newTask = new Task({
+        title: req.body.title,
+        _listId: req.params.listId
+      });
+      newTask.save().then((newTaskDoc) => {
+        res.send(newTaskDoc)
+      });
+    } else {
+      res.sendStatus(404);
+    }
+  })
+});
+
+app.patch('/lists/:listId/tasks/:taskId', authenticate, (req, res) => {
+  List.findOne({
+    _id: req.params.listId,
+    _userId: req.user_id
+  }).then((list) => {
+    if(list) {
+      return true;
+    } else {
+      return false;
+    }
+  }).then((canUpdateTask) => {
+    if(canUpdateTask) {
+      Task.findOneAndUpdate(
+        {
+          _id: req.params.taskId,
+          _listId: req.params.listId
+        },
+        { $set: req.body }
+      ).then(() => {
+        res.send({ message: 'Update sucessfully!'})
+      })    
+    } else {
+      res.sendStatus(404);
+    }
   });
-  newTask.save().then((newTaskDoc) => {
-    res.send(newTaskDoc)
-  })
 });
 
-app.patch('/lists/:listId/tasks/:taskId', (req, res) => {
-  Task.findOneAndUpdate(
-    {
-      _id: req.params.taskId,
-      _listId: req.params.listId
-    },
-    { $set: req.body }
-  ).then(() => {
-    res.send({ message: 'Update sucessfully!'})
-  })
-});
-
-app.delete('/lists/:listId/tasks/:taskId', (req, res) => {
-  Task.findOneAndRemove({
-    _id: req.params.taskId,
-    _listId: req.params.listId
-  }).then(removedTaskList => {
-    res.send(removedTaskList)
-  })
+app.delete('/lists/:listId/tasks/:taskId', authenticate, (req, res) => {
+  List.findOne({
+    _id: req.params.listId,
+    _userId: req.user_id
+  }).then((list) => {
+    if(list) {
+      return true;
+    } else {
+      return false;
+    }
+  }).then((canDeleteTask) => {
+    if(canDeleteTask) {
+      Task.findOneAndRemove({
+        _id: req.params.taskId,
+        _listId: req.params.listId
+      }).then(removedTaskList => {
+        res.send(removedTaskList);
+      });
+    } else {
+      res.sendStatus(404);
+    }
+  });
 });
 
 //GET SPECIFIC TASK
 app.get('/lists/:listId/tasks/:taskId', (req, res) => {
-  Task.findOne({
-    _id: req.params.taskId,
-    _listId: req.params.listId
-  }).then(taskDoc => {
-    res.send(taskDoc)
-  })
+  List.findOne({
+    _id: req.params.listId,
+    _userId: req.user_id
+  }).then((list) => {
+    if(list) {
+      return true;
+    } else {
+      return false;
+    }
+  }).then((canGetTask) => {
+    if(canGetTask) {
+      Task.findOne({
+        _id: req.params.taskId,
+        _listId: req.params.listId
+      }).then(taskDoc => {
+        res.send(taskDoc)
+      });
+    } else {
+      res.sendStatus(404);
+    }
+  });
 });
 
 
@@ -189,6 +266,15 @@ app.get('/users/me/access-token', verifySession, (req, res) => {
     res.status(400).send(e);
   }) 
 })
+
+
+// HELPER METHODS
+let deleteTasksFromList = (_listId) => {
+  Task.deleteMany({
+    _listId
+  })
+}
+
 
 app.listen(3000, () => {
   console.log('Server is listening on port 3000');
