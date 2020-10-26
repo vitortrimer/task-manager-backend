@@ -12,7 +12,7 @@ app.use(bodyParser.json());
 app.use(function(req, res, next) {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE");
-  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, x-access-token, Content-Type, Accept");
   
   res.header(
     "Access-Control-Expose-Headers",
@@ -71,7 +71,7 @@ const { List, Task, User } = require('./db/models');
 //LISTS
 app.get('/lists', authenticate, (req, res) => {
   List.find({
-    // _userId: req.user_id
+    _userId: req.user_id
   }).then((lists) => {
     res.send(lists)
   })
